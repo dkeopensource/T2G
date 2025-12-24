@@ -139,7 +139,7 @@ def get_period_wt(X): #WT
 	return max(w, series_length / 20)
 
 
-def get_dtw_sliding_window_stride_individual(X, Y, nw, nj, devide, function):
+def get_dtw_sliding_window_stride_individual(X, Y, nw, nj, devide, testidx, function):
 	"""
 	Compute pairwise DTW distances using different window sizes (w) for each label.
 	Also store the sliding windowed data.
@@ -187,6 +187,27 @@ def get_dtw_sliding_window_stride_individual(X, Y, nw, nj, devide, function):
 	for k in range(len(X)):  
 		label = Y[k]
 		w = w_dict[label]
+
+		# Test 데이터는 개별 series 기반으로 다시 w 계산
+		if k in testidx:
+			if nw == -1:
+				if function == 'ACF':
+					w = int(get_optimal_window_size(series.reshape(1, -1)))
+				elif function == 'FFT':
+					w = int(get_period_fft(series.reshape(1, -1)))
+				elif function == 'LSP':
+					w = int(get_period_lsp(series.reshape(1, -1)))
+				elif function == 'WT':
+					w = int(get_period_wt(series.reshape(1, -1)))
+				else:
+					w = int(get_optimal_window_size(series.reshape(1, -1)))
+
+		series_length = len(series)
+
+		if w >= series_length:
+			w = series_length // 2
+		
+		# j 계산
 		j = max(1, w // devide) if nj == -1 else nj
 
 		series_length = X.shape[1]
@@ -233,8 +254,22 @@ if __name__ == "__main__":
 
 	X, Y = read_X_with_Y(dataset_dir, args.dataset)
 
-	dtw_arr, data_arr = get_dtw_sliding_window_stride_individual(X, Y, args.w, args.j, args.d, args.f)
-	
+	shotdic = load_shot_dict(os.path.join(shot_txt))
 
-	np.save(os.path.join(result_dir, args.dataset), np.array(dtw_arr, dtype=object))
-	np.save(os.path.join(result_dir1, args.dataset), np.array(data_arr, dtype=object))
+	if args.dataset in shotdic:
+		#print(f"shot{shotdic[args.dataset]}")
+		test_idx = read_testidx_from_npy(
+			os.path.join(
+				data_dir,
+				'ucr_datasets_' + str(shotdic[args.dataset]) + '_shot',
+				args.dataset + '.npy'
+			)
+		)
+
+		dtw_arr, data_arr = get_dtw_sliding_window_stride_individual(X, Y, args.w, args.j, args.d, test_idx, args.f)
+
+		np.save(os.path.join(result_dir, args.dataset), np.array(dtw_arr, dtype=object))
+		np.save(os.path.join(result_dir1, args.dataset), np.array(data_arr, dtype=object))
+	else:
+		print(f"No shot infomation")
+
