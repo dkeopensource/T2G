@@ -251,7 +251,7 @@ class GCNEmbedding(nn.Module):
 
 
 class SimTSC(nn.Module):
-	def __init__(self, input_size, nb_classes, normalized_data_list, sliding_adj, resWeight, subWeight, num_layers=1, n_feature_maps=64, dropout=0.5):
+	def __init__(self, input_size, nb_classes, normalized_data_list, sliding_adj, GSEWeight, LGEWeight, num_layers=1, n_feature_maps=64, dropout=0.5):
 		super(SimTSC, self).__init__()
 		self.num_layers = num_layers
 		self.input_size = input_size
@@ -259,8 +259,8 @@ class SimTSC(nn.Module):
 		self.sliding_adj = sliding_adj
 		self.n_feature_maps = n_feature_maps
 
-		self.resWeight = resWeight
-		self.subWeight = subWeight
+		self.GSEWeight = GSEWeight
+		self.LGEWeight = LGEWeight
 
 
 		self.block_1 = ResNetBlock(input_size, n_feature_maps)
@@ -305,12 +305,14 @@ class SimTSC(nn.Module):
 		x = self.block_1(x)
 		x = self.block_2(x)
 		x = self.block_3(x)
-		yy = F.avg_pool1d(x, x.shape[-1]).squeeze()
+		GSE_embedding = F.avg_pool1d(x, x.shape[-1]).squeeze()
 		
 		num=0
 		
-		y = torch.zeros((len(idx), self.n_feature_maps)).to(device)
-		
+		LGE_embedding = torch.zeros((len(idx), self.n_feature_maps)).to(device)
+		LGE_list = []
+
+
 		device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 		gcn_embedding = gcn_embedding.to(device)
 
@@ -330,10 +332,20 @@ class SimTSC(nn.Module):
 
 			assert sx.device == next(gcn_embedding.parameters()).device, f"Mismatch: sx on {sx.device}, model on {next(gcn_embedding.parameters()).device}"
 			assert sadj.device == next(gcn_embedding.parameters()).device, f"Mismatch: sadj on {sadj.device}, model on {next(gcn_embedding.parameters()).device}"
-			y[num] = gcn_embedding(sx, sadj)
+			LGE_embedding[num] = gcn_embedding(sx, sadj)
+			LGE_list.append(LGE_embedding[num])
 			num += 1
 
-		y = (self.resWeight * y + self.subWeight * yy)
+		LGE = torch.stack(y_list, dim=0)
+
+		LGE_vec = self.local_bn(LGE)
+		GSE_vec = self.local_bn(GSE)
+
+		LGE_norm = F.normalize(LGE_vec - LGE_vec.mean(dim=0), p=2, dim=1)
+		GSE_norm = F.normalize(GSE_vec - GSE_vec.mean(dim=0), p=2, dim=1)
+
+
+		y = (self.GSEWeight * GSE_norm + self.LGEWeight * LGE_norm)
 
 		if self.num_layers == 1:
 			y = self.gc1(y, adj)
